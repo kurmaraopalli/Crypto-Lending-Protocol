@@ -8,19 +8,111 @@ The frontend interface for this project is hosted publicly via GitHub Pages:
 
 ---
 
+## 🔒 Introduction to Cryptography & Its Uses
+
+Cryptography is the science and practice of securing communication and data from adversaries. In blockchain networks like Ethereum, cryptography is the foundation that enables trustless, decentralized security.
+
+### Core Concepts
+1. **Symmetric Cryptography**: Uses a single shared key to both encrypt and decrypt data (e.g., AES).
+2. **Asymmetric (Public-Key) Cryptography**: Uses a mathematically linked key pair:
+   * **Public Key**: Accessible to anyone, used to encrypt data or verify a signature (akin to a bank account number).
+   * **Private Key**: Kept strictly secret, used to decrypt data or generate a signature (akin to a digital signature/password).
+3. **Cryptographic Hash Functions**: One-way mathematical functions (like SHA-256 or Keccak-256) that convert any input into a unique, fixed-size string of characters. They are preimage resistant, second-preimage resistant, and collision resistant.
+
+### Key Uses in Blockchain & Lending Protocols
+* **Digital Signatures**: When you interact with this Lending Protocol via MetaMask, you use your private key to sign a transaction. The network uses your public key to verify that you authorized the action without ever revealing your private key.
+* **Address Generation**: Blockchain addresses (like your Ethereum wallet address) are cryptographically derived from your public key.
+* **Block Integrity (Hashing)**: Transactions are hashed and grouped into blocks. Each block references the previous block's hash, forming an immutable chain of data.
+* **Key Derivation (Mnemonic Phrases)**: User wallets generate a master seed phrase that cryptographically derives all accounts and private keys.
+
+---
+
+
 ## 🏗️ Architecture & Project Workflow
 
 This project connects a React/Next.js web interface to smart contracts deployed on the Ethereum Sepolia Testnet.
 
-```text
-[Web UI via GitHub Pages] <---> [Crypto Wallet (MetaMask)] <---> [Sepolia Testnet Smart Contracts]
+```mermaid
+graph TD
+    classDef actor fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e40af;
+    classDef client fill:#ecfeff,stroke:#06b6d4,stroke-width:2px,color:#155e75;
+    classDef wallet fill:#faf5ff,stroke:#a855f7,stroke-width:2px,color:#6b21a8;
+    classDef contract fill:#fff1f2,stroke:#f43f5e,stroke-width:2px,color:#9f1239;
+    classDef token fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#166534;
+    classDef network fill:#fffbeb,stroke:#f59e0b,stroke-width:2px,color:#78350f;
+
+    subgraph Actors ["Users & Actors"]
+        Lender["Lender<br/>(Liquidity Provider)"]:::actor
+        Borrower["Borrower<br/>(Collateral Depositor)"]:::actor
+    end
+
+    subgraph Client_Layer ["Frontend Client Layer"]
+        ReactUI["Next.js Web UI<br/>(GitHub Pages)"]:::client
+        Bridge["Ethers.js / Wagmi & RainbowKit<br/>(dApp Bridge)"]:::client
+        Wallet["MetaMask / Crypto Wallet<br/>(Transaction Signer)"]:::wallet
+    end
+
+    subgraph Blockchain_Layer ["Ethereum Sepolia Testnet"]
+        subgraph Smart_Contracts ["Smart Contracts"]
+            LP["LendingPool.sol<br/>(Lending Pool Contract)"]:::contract
+            MTK["MyTestToken.sol<br/>(Custom ERC-20 Collateral)"]:::token
+        end
+    end
+
+    %% User interactions with UI
+    Lender -->|1. Deposits Liquidity| ReactUI
+    Borrower -->|2. Deposits Collateral & Borrows| ReactUI
+
+    %% UI to Wallet
+    ReactUI -->|Triggers UI Events| Bridge
+    Bridge -->|Requests Signature| Wallet
+
+    %% Wallet to Blockchain
+    Wallet -->|3. Broadcasts Transactions| LP
+    Wallet -->|Approve Token Allowance| MTK
+
+    %% Inter-Contract Workflow
+    LP -->|Reads Balances / Checks Allowance| MTK
+    LP -->|depositCollateral() -> transferFrom| MTK
+    LP -.->|Updates collateralBalances Mapping| LP
+    LP -.->|Updates borrowedBalances Mapping| LP
 ```
+
 
 1. **Lenders** deposit assets into the liquidity pool to earn passive interest.
 2. **Borrowers** lock up custom tokens (`MTK`) as collateral.
 3. **Smart Contracts** safely calculate collateral ratios and issue loans automatically.
 
 ---
+
+## 📖 How to Use the Application
+
+Follow these steps to interact with the dApp (whether on the live demo or running locally):
+
+### Step 1: Connect MetaMask Wallet
+1. Open the application in your browser.
+2. Click **Connect Wallet** (powered by RainbowKit/Wagmi).
+3. Approve the connection in MetaMask and make sure your network is set to the **Ethereum Sepolia Testnet**.
+
+### Step 2: Mint or Acquire `MTK` Collateral Tokens
+1. Ensure you have some custom `MTK` tokens in your wallet (minted during deployment or via a Mint button on the UI).
+2. Ensure you also have test **Sepolia ETH** in your wallet to cover transaction gas fees (you can obtain this from a Sepolia ETH faucet).
+
+### Step 3: Approve & Deposit Collateral
+1. Navigate to the **Deposit Collateral** section of the dApp.
+2. Enter the amount of `MTK` tokens you want to lock up as collateral.
+3. Click **Approve** to authorize the `LendingPool` contract to transfer your tokens (confirm this approval in MetaMask).
+4. Once approved, click **Deposit** to lock your tokens in the contract.
+
+### Step 4: Borrow Assets
+1. Check your collateral balance displayed on the dashboard.
+2. Navigate to the **Borrow Asset** section.
+3. Enter the amount of assets you wish to borrow.
+4. **Note:** The contract enforces a **50% Loan-to-Value (LTV)** limit. You can only borrow up to 50% of the value of your deposited collateral.
+5. Click **Borrow** and approve the transaction in MetaMask.
+
+---
+
 
 ## 🪙 1. Custom Token Smart Contract (`MyTestToken.sol`)
 
@@ -67,14 +159,17 @@ contract LendingPool {
     // Lock custom MTK tokens into the contract as collateral
     function depositCollateral(uint256 _amount) external {
         require(_amount > 0, "Amount must be greater than 0");
-        IERC20(collateralToken).transferFrom(msg.sender, address(this), _amount);
+        require(IERC20(collateralToken).transferFrom(msg.sender, address(this), _amount), "Collateral transfer failed");
         collateralBalances[msg.sender] += _amount;
     }
 
     // Basic mock borrow function (simulates lending asset back to user)
     function borrowAsset(uint256 _amount) external {
-        // Simplified safety logic: Ensure user has locked collateral first
-        require(collateralBalances[msg.sender] > 0, "No collateral deposited");
+        require(_amount > 0, "Amount must be greater than 0");
+        // Over-collateralization check: User can borrow up to 50% of their deposited collateral
+        uint256 maxBorrow = collateralBalances[msg.sender] / 2;
+        require(borrowedBalances[msg.sender] + _amount <= maxBorrow, "Insufficient collateral (must be 200% collateralized)");
+        
         borrowedBalances[msg.sender] += _amount;
         // Logic to transfer borrowed tokens to user goes here
     }
